@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Měsíční přehled</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+
+        h2 {
+            color: #007bff;
+            margin-bottom: 20px;
+        }
+
+        #feedback {
+            font-size: 1.2rem;
+            text-align: center;
+            color: #dc3545; /* Bootstrap danger color */
+            margin-bottom: 20px;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        .btn-custom {
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.3s;
+        }
+
+        .btn-custom:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container mt-5">
+        <h2 class="text-center">Měsíční přehled</h2>
+        <form @submit.prevent="loadTableData" class="mt-3">
+            <div class="form-row">
+                <div class="form-group col-md-4">
+                    <label for="startMonth">Od měsíce:</label>
+                    <select v-model="startMonth" class="form-control" id="startMonth" @change="updateEndMonthOptions">
+                        <option value="" disabled selected>Vyberte měsíc</option>
+                        <option v-for="month in months" :key="month" :value="month">{{ month }}</option>
+                    </select>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="endMonth">Do měsíce:</label>
+                    <select v-model="endMonth" class="form-control" id="endMonth">
+                        <option value="" disabled selected>Vyberte měsíc</option>
+                        <option v-for="month in filteredMonths" :key="month" :value="month">{{ month }}</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-custom btn-block">Zobrazit přehled</button>
+        </form>
+
+        <div class="table-container mt-4">
+            <div v-if="feedback" id="feedback">{{ feedback }}</div>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Nápoj</th>
+                        <th>Počet</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-if="data.length === 0">
+                        <td colspan="2" class="text-center">Žádná data k dispozici</td>
+                    </tr>
+                    <tr v-for="(entry, index) in data" :key="index">
+                        <td>{{ entry[0] }}</td>
+                        <td>{{ entry[1] }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script>
+        new Vue({
+            el: '#app',
+            data: {
+                apiUrl: "http://ajax1.lmsoft.cz/procedure.php",
+                username: "coffe",
+                password: "kafe",
+                months: Array.from({ length: 12 }, (v, k) => k + 1),
+                startMonth: null,
+                endMonth: null,
+                data: [],
+                feedback: ''
+            },
+            computed: {
+                filteredMonths() {
+                    return this.months.filter(month => month >= this.startMonth);
+                }
+            },
+            methods: {
+                sendRequest(endpoint, data, method = 'GET') {
+                    return $.ajax({
+                        url: `${this.apiUrl}?cmd=${endpoint}&${data}`,
+                        type: method,
+                        dataType: 'json',
+                        contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
+                        headers: {
+                            "Authorization": "Basic " + btoa(this.username + ":" + this.password)
+                        }
+                    });
+                },
+                displayFeedback(message) {
+                    this.feedback = message;
+                    setTimeout(() => { this.feedback = ''; }, 3000);
+                },
+                mergeData(allData) {
+                    const result = {};
+
+                    allData.forEach(data => {
+                        if (Array.isArray(data)) {
+                            data.forEach(entry => {
+                                if (Array.isArray(entry) && entry.length >= 2) {
+                                    const drink = entry[0];
+                                    const count = parseInt(entry[1], 10);
+                                    result[drink] = (result[drink] || 0) + count;
+                                }
+                            });
+                        }
+                    });
+
+                    return Object.keys(result).map(drink => [drink, result[drink]]);
+                },
+                loadTableData() {
+                    this.feedback = '';
+                    this.data = [];
+                    if (this.startMonth > this.endMonth) {
+                        this.displayFeedback('Začátek měsíce nemůže být pozdější než konec měsíce.');
+                        return;
+                    }
+
+                    const requests = [];
+                    if (this.startMonth === this.endMonth) {
+                        requests.push(this.sendRequest('getSummaryOfDrinks', `month=${this.startMonth}`));
+                    } else {
+                        for (let month = this.startMonth; month <= this.endMonth; month++) {
+                            requests.push(this.sendRequest('getSummaryOfDrinks', `month=${month}`));
+                        }
+                    }
+
+                    $.when(...requests)
+                        .done((...responses) => {
+                            const allData = responses.map(response => response[0]);
+                            this.data = this.mergeData(allData);
+                        })
+                        .fail((jqXHR, textStatus, errorThrown) => {
+                            console.error("Requests Fail:", textStatus, errorThrown);
+                            this.displayFeedback('Došlo k chybě při načítání dat.');
+                        });
+                },
+                updateEndMonthOptions() {
+                    // Reset the endMonth when startMonth is changed
+                    this.endMonth = null;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
